@@ -2,6 +2,8 @@ package net.spacealtctrl.discordrp.ui.screens.you
 
 import android.app.ActivityManager
 import android.content.Context
+import android.webkit.CookieManager
+import android.webkit.WebStorage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,6 +19,7 @@ import net.spacealtctrl.discordrp.presence.BridgeFeed
 import net.spacealtctrl.discordrp.presence.PresenceComposer
 import net.spacealtctrl.discordrp.settings.Mood
 import net.spacealtctrl.discordrp.settings.Stash
+import net.spacealtctrl.discordrp.settings.TokenVault
 import net.spacealtctrl.discordrp.update.AppUpdate
 import net.spacealtctrl.discordrp.update.UpdateHub
 import net.spacealtctrl.discordrp.update.UpdateState
@@ -66,6 +69,15 @@ class YouViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), YouUiState())
 
     fun signOut() {
+        // clearApplicationUserData removes the sealed blob with the rest of the
+        // sandbox; drop the Keystore key and WebView copies first so neither
+        // survives even if the data wipe is interrupted.
+        runCatching {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            WebStorage.getInstance().deleteAllData()
+        }
+        TokenVault.forget()
         appContext.getSystemService(ActivityManager::class.java)
             ?.clearApplicationUserData()
     }

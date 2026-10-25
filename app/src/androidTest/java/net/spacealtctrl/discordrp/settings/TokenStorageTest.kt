@@ -8,6 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -69,6 +70,42 @@ class TokenStorageTest {
         assertFalse(stash.signedIn)
         assertNull(prefs.getString("discord.token", null))
         assertNull(prefs.getString("discord.token.enc", null))
+    }
+
+    @Test
+    fun tokenIsReadFromStorageOnEveryAccess() {
+        val stash = stash()
+        stash.authToken = "first-token"
+
+        // The plaintext is not cached: replacing the sealed blob behind the
+        // store's back changes what the next read returns.
+        prefs.edit().putString("discord.token.enc", TokenVault.encrypt("second-token")).commit()
+
+        assertEquals("second-token", stash.authToken)
+    }
+
+    @Test
+    fun signedInFollowsStoredBlobPresence() {
+        val stash = stash()
+        assertFalse(stash.signedIn)
+
+        prefs.edit().putString("discord.token.enc", TokenVault.encrypt("probe-token")).commit()
+        assertTrue(stash.signedIn)
+
+        stash.clearToken()
+        assertFalse(stash.signedIn)
+    }
+
+    @Test
+    fun corruptedBlobIsRejectedWithoutPlaintextFallback() {
+        assertNull(TokenVault.decrypt("not-a-blob"))
+        assertNull(TokenVault.decrypt("iv:not-base64!!"))
+
+        prefs.edit().putString("discord.token.enc", "not-a-blob").commit()
+        val stash = stash()
+
+        assertEquals("", stash.authToken)
+        assertNull(prefs.getString("discord.token", null))
     }
 
     @Test

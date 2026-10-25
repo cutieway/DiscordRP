@@ -124,6 +124,9 @@ fun TokenCapture(onToken: (String) -> Unit) {
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
                 settings.javaScriptCanOpenWindowsAutomatically = false
+                settings.setSupportMultipleWindows(false)
+                settings.setGeolocationEnabled(false)
+                settings.mediaPlaybackRequiresUserGesture = true
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 if (Build.MANUFACTURER.equals("motorola", ignoreCase = true)) {
                     settings.userAgentString = FALLBACK_UA

@@ -42,19 +42,16 @@ Get the latest APK from [Releases](../../releases). Android 8.0 or newer, no Goo
 or Play Services required.
 
 > **Warning**
-> This is an unofficial client that signs in with a Discord user token. Discord's
-> developer policy prohibits applications from obtaining user login tokens, and
-> using one can lead to account restriction or termination. Use a test account
-> unless you accept that risk.
+> Discord's Terms of Service and developer policy prohibit third-party clients that sign in
+> with a user token. This project is not affiliated with Discord, and you use it at your own
+> risk: you take full responsibility for your account. The approach is a long-standing
+> community standard because Discord offers no official API for these features without a
+> token, and this fork is hardened specifically around handling that credential.
 
 ## Updates
 
-Fork builds check `cutieway/DiscordRP` releases. The updater requires the APK's
-SHA-256 digest from the release metadata and rejects an asset without one. Before
-handing a download to the installer it also verifies the package id and signing
-certificate against the running app. Android enforces the same signature rule at
-install time, so publish fork releases with the key the installed app was signed
-with.
+Updates come from `cutieway/DiscordRP` releases and must be signed with the same key as
+the installed build.
 
 ## Setup
 
@@ -69,13 +66,16 @@ reason messages stop arriving while the screen is off.
 ## Privacy
 
 No analytics, no crash reporting, and no server in the middle. The app talks to Discord,
-MusicBrainz, the Cover Art Archive, and GitHub for update checks directly. The login
-token is sealed with an Android Keystore key and is removed by signing out.
+MusicBrainz, the Cover Art Archive, and GitHub for update checks directly. Your login never
+leaves the device except to Discord: it is sealed with an Android Keystore key
+(AES-256-GCM, hardware-backed where available), stays out of logs, crash reports,
+notifications, and backups, and is removed when you sign out.
 
 ## Credits
 
-The rich presence implementation draws on ideas from [Kizzy](https://github.com/dead8309/Kizzy)
-by **dead8309**.
+Fork of [spacealtctrl/DiscordRP](https://github.com/spacealtctrl/DiscordRP). The rich
+presence implementation draws on ideas from
+[Kizzy](https://github.com/dead8309/Kizzy) by **dead8309**.
 
 ## License
 

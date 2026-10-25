@@ -19,9 +19,6 @@ class Stash private constructor(context: Context, prefsName: String = PREFS_NAME
     private val _revisions = MutableStateFlow(0)
     val revisions: StateFlow<Int> = _revisions.asStateFlow()
 
-    @Volatile
-    private var tokenCache: String? = null
-
     private fun write(block: SharedPreferences.Editor.() -> Unit) {
         val editor = prefs.edit()
         editor.block()
@@ -30,24 +27,27 @@ class Stash private constructor(context: Context, prefsName: String = PREFS_NAME
     }
 
     var authToken: String
-        get() = tokenCache ?: readToken().also { if (it.isNotEmpty()) tokenCache = it }
+        // Decrypt on demand: the plaintext must not survive in the process
+        // beyond the call that needs it.
+        get() = readToken()
         set(value) {
             val token = value.trim()
             if (token.isEmpty()) {
-                tokenCache = ""
-                write {
-                    remove(KEY_TOKEN)
-                    remove(KEY_TOKEN_ENC)
-                }
+                clearToken()
             } else {
                 val sealed = TokenVault.encrypt(token)
-                tokenCache = token
                 write {
                     putString(KEY_TOKEN_ENC, sealed)
                     remove(KEY_TOKEN)
                 }
             }
         }
+
+    /** Drops the stored credential without touching the rest of the settings. */
+    fun clearToken() = write {
+        remove(KEY_TOKEN)
+        remove(KEY_TOKEN_ENC)
+    }
 
     private fun readToken(): String {
         prefs.getString(KEY_TOKEN_ENC, null)?.let { sealed ->
@@ -82,7 +82,11 @@ class Stash private constructor(context: Context, prefsName: String = PREFS_NAME
         get() = prefs.getString(KEY_PROFILE_CACHE, null).orEmpty()
         set(value) = write { putString(KEY_PROFILE_CACHE, value) }
 
-    val signedIn: Boolean get() = authToken.isNotBlank()
+    // Presence check only: reading the sealed blob is enough to tell the UI
+    // whether a session exists, and avoids decrypting on every recomposition.
+    val signedIn: Boolean
+        get() = prefs.contains(KEY_TOKEN_ENC) ||
+            !prefs.getString(KEY_TOKEN, null).isNullOrBlank()
 
     var presenceEnabled: Boolean
         get() = prefs.getBoolean(KEY_PRESENCE_ON, true)

@@ -1,17 +1,17 @@
-package net.spacealtctrl.discordrp.ui.crash
+package net.spacealtctrl.discordrp.log
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class CrashRedactorTest {
+class RedactorTest {
     @Test
     fun removesTokenShapedValues() {
         val token = "${"M".repeat(24)}.${"Ga4BcD"}.${"a".repeat(38)}"
         val mfa = "mfa.${"A".repeat(84)}"
 
-        val redacted = CrashRedactor.redact("token=$token\nmfa=$mfa")
+        val redacted = Redactor.redact("token=$token\nmfa=$mfa")
         assertFalse(redacted.contains(token))
         assertFalse(redacted.contains(mfa))
         assertTrue(redacted.contains("[redacted-token]"))
@@ -25,7 +25,7 @@ class CrashRedactorTest {
             Accept: application/json
         """.trimIndent()
 
-        val redacted = CrashRedactor.redact(report)
+        val redacted = Redactor.redact(report)
         assertFalse(redacted.contains("eyJhbGciOiJIUzI1NiJ9"))
         assertFalse(redacted.contains("session=abc123"))
         assertTrue(redacted.contains("Authorization: [redacted]"))
@@ -35,7 +35,7 @@ class CrashRedactorTest {
 
     @Test
     fun removesAuthenticatedUrlParts() {
-        val redacted = CrashRedactor.redact(
+        val redacted = Redactor.redact(
             "GET https://cdn.discordapp.com/a/b.png?ex=1&is=2&hm=deadbeef " +
                 "https://user:pass@discord.com/app?token=abc",
         )
@@ -55,7 +55,7 @@ class CrashRedactorTest {
                 "GET https://storage.googleapis.com/b?X-Goog-Signature=cafe" +
                 "&X-Goog-Credential=svc%2F20260101&GoogleAccessId=svc@example.test&Expires=1"
 
-        val redacted = CrashRedactor.redact(report)
+        val redacted = Redactor.redact(report)
         assertFalse(redacted.contains("deadbeef"))
         assertFalse(redacted.contains("AKIAEXAMPLE"))
         assertFalse(redacted.contains("secretvalue"))
@@ -73,7 +73,7 @@ class CrashRedactorTest {
             PASSWORD: swordfish
         """.trimIndent()
 
-        val redacted = CrashRedactor.redact(report)
+        val redacted = Redactor.redact(report)
         assertFalse(redacted.contains("hunter2"))
         assertFalse(redacted.contains("abc123"))
         assertFalse(redacted.contains("k-1"))
@@ -93,7 +93,7 @@ class CrashRedactorTest {
             set_cookie=kv-cookie
         """.trimIndent()
 
-        val redacted = CrashRedactor.redact(report)
+        val redacted = Redactor.redact(report)
         assertFalse(redacted.contains("short-test-secret"))
         assertFalse(redacted.contains("example-secret"))
         assertFalse(redacted.contains("json-cookie"))
@@ -109,6 +109,15 @@ class CrashRedactorTest {
     }
 
     @Test
+    fun redactsLongOpaqueRuns() {
+        val blob = "A".repeat(64)
+        val redacted = Redactor.redact("material=$blob setting=ok")
+        assertFalse(redacted.contains(blob))
+        assertTrue(redacted.contains("[redacted]"))
+        assertTrue(redacted.contains("setting=ok"))
+    }
+
+    @Test
     fun leavesOrdinaryTextAlone() {
         val report = """
             java.lang.IllegalStateException: update signature mismatch
@@ -117,6 +126,6 @@ class CrashRedactorTest {
             See https://discord.com/app
         """.trimIndent()
 
-        assertEquals(report, CrashRedactor.redact(report))
+        assertEquals(report, Redactor.redact(report))
     }
 }

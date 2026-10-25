@@ -1,5 +1,6 @@
 package net.spacealtctrl.discordrp.settings
 
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -10,26 +11,38 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Seals the Discord token with an Android Keystore key. The key is deliberately
- * not user-authentication bound: the gateway service has to read the token while
- * the screen is off.
+ * Seals the Discord token with an Android Keystore key.
+ *
+ * The key is deliberately not user-authentication bound and not tied to the
+ * unlocked-device state: the gateway service has to read the token while the
+ * screen is off. `EncryptedSharedPreferences` would add a second wrapping layer
+ * without changing that property, so the vault is the single, documented story
+ * for token storage. The sealed blob lives in private preferences, which the
+ * backup rules exclude.
+ *
+ * Plaintext is held only for the duration of one call. Byte buffers used to
+ * move it through the cipher are zeroed afterwards; Kotlin strings themselves
+ * cannot be wiped, so the callers keep the returned value short-lived.
  */
 internal object TokenVault {
     private const val KEYSTORE = "AndroidKeyStore"
     private const val ALIAS = "discordrp.token.v1"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val TAG_BITS = 128
+    private const val KEY_BITS = 256
 
     @Synchronized
     fun encrypt(plaintext: String): String {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, key())
-        val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
-        val body = Base64.encodeToString(
-            cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8)),
-            Base64.NO_WRAP,
-        )
-        return "$iv:$body"
+        val bytes = plaintext.toByteArray(Charsets.UTF_8)
+        try {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, key())
+            val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
+            val body = Base64.encodeToString(cipher.doFinal(bytes), Base64.NO_WRAP)
+            return "$iv:$body"
+        } finally {
+            bytes.fill(0)
+        }
     }
 
     @Synchronized
@@ -44,7 +57,12 @@ internal object TokenVault {
                 key(),
                 GCMParameterSpec(TAG_BITS, Base64.decode(parts[0], Base64.NO_WRAP)),
             )
-            String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8)
+            val plain = cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP))
+            try {
+                String(plain, Charsets.UTF_8)
+            } finally {
+                plain.fill(0)
+            }
         }
     } catch (_: Exception) {
         // A missing or invalidated key means the stored token is unusable; the
@@ -52,21 +70,48 @@ internal object TokenVault {
         null
     }
 
+    /**
+     * Drops the key. Call on an explicit sign-out so even a sealed blob that
+     * escaped the app sandbox (backup, extracted file) cannot be opened again.
+     */
+    @Synchronized
+    fun forget() {
+        runCatching {
+            KeyStore.getInstance(KEYSTORE).apply { load(null) }.deleteEntry(ALIAS)
+        }
+    }
+
     private fun key(): SecretKey {
         val store = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        return generate()
+    }
+
+    private fun generate(): SecretKey {
+        // Hardware-backed keys when the device offers them; the fallback keeps
+        // the app working where StrongBox is absent or already occupied.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            runCatching { generate(strongBox = true) }.getOrNull()?.let { return it }
+        }
+        return generate(strongBox = false)
+    }
+
+    private fun generate(strongBox: Boolean): SecretKey {
+        val builder = KeyGenParameterSpec.Builder(
+            ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(KEY_BITS)
+            .setUserAuthenticationRequired(false)
+            .setRandomizedEncryptionRequired(true)
+        if (strongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            builder.setIsStrongBoxBacked(true)
+        }
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
-        generator.init(
-            KeyGenParameterSpec.Builder(
-                ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                .build(),
-        )
+        generator.init(builder.build())
         return generator.generateKey()
     }
 }

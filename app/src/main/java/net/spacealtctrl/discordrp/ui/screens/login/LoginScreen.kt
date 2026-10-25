@@ -10,6 +10,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -100,6 +105,10 @@ class LoginViewModel @Inject constructor(
 
     fun onToken(token: String) {
         if (_stage.value == LoginStage.Verifying) return
+        if (!TokenShape.isPlausible(token)) {
+            _stage.value = LoginStage.Failed
+            return
+        }
         _stage.value = LoginStage.Verifying
         viewModelScope.launch {
             val accepted = runCatching { handshake.run(token) }.getOrDefault(false)
@@ -116,6 +125,7 @@ fun LoginScreen(
     viewModel: LoginViewModel = hiltViewModel(),
 ) {
     val stage by viewModel.stage.collectAsState()
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var manualTokenOpen by remember { mutableStateOf(false) }
     var manualToken by remember { mutableStateOf("") }
@@ -338,6 +348,7 @@ fun LoginScreen(
                         enabled = cleanToken.isNotEmpty() && stage != LoginStage.Verifying,
                         onClick = {
                             closeManualToken()
+                            clearClipboardIfMatches(context, cleanToken)
                             viewModel.onToken(cleanToken)
                         },
                     ) {
@@ -350,6 +361,27 @@ fun LoginScreen(
                     }
                 },
             )
+        }
+    }
+}
+
+/**
+ * A pasted token is a credential left behind in the clipboard. Clear it once
+ * the app has its copy, but only when the clipboard still holds exactly what
+ * was pasted.
+ */
+private fun clearClipboardIfMatches(context: Context, token: String) {
+    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
+    val clip = clipboard.primaryClip ?: return
+    if (clip.itemCount == 0) return
+    val copied = clip.getItemAt(0).text?.toString()
+        ?.trim()?.removeSurrounding("\"")?.trim()
+    if (copied != token) return
+    runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            clipboard.clearPrimaryClip()
+        } else {
+            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
         }
     }
 }

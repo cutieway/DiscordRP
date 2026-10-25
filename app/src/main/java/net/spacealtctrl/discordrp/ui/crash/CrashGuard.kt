@@ -3,6 +3,7 @@ package net.spacealtctrl.discordrp.ui.crash
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import net.spacealtctrl.discordrp.log.Redactor
 import java.io.PrintWriter
 import java.io.StringWriter
 import kotlin.system.exitProcess
@@ -27,7 +28,7 @@ object CrashGuard {
 
     private fun describe(context: Context, error: Throwable): String {
         val trace = StringWriter().also { error.printStackTrace(PrintWriter(it)) }.toString()
-        val redacted = CrashRedactor.redact(trace)
+        val redacted = Redactor.redact(trace)
         val version = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "?"

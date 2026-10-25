@@ -32,7 +32,7 @@ import net.spacealtctrl.discordrp.log.SilentLog
 import kotlin.random.Random
 
 class GatewayEngine(
-    private val token: String,
+    private val tokenProvider: () -> String,
     private val mobileBadge: Boolean,
     private val autoRedial: Boolean = true,
     fallbackSelfId: String? = null,
@@ -263,7 +263,7 @@ class GatewayEngine(
         transmit(
             Op.IDENTIFY,
             GatewayCodec.encode(
-                IdentifyRequest(token = token, properties = ClientStamp.forMobileBadge(mobileBadge))
+                IdentifyRequest(token = tokenProvider(), properties = ClientStamp.forMobileBadge(mobileBadge))
             ),
         )
     }
@@ -273,7 +273,7 @@ class GatewayEngine(
         transmit(
             Op.RESUME,
             GatewayCodec.encode(
-                ResumeRequest(token = token, sessionId = sessionId.orEmpty(), seq = seq)
+                ResumeRequest(token = tokenProvider(), sessionId = sessionId.orEmpty(), seq = seq)
             ),
         )
     }
