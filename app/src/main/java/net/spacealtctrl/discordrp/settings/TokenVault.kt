@@ -25,18 +25,20 @@ import javax.crypto.spec.GCMParameterSpec
  * cannot be wiped, so the callers keep the returned value short-lived.
  */
 internal object TokenVault {
+    /** Alias used by the signed-in app. Test stores derive their own alias. */
+    const val ALIAS = "discordrp.token.v1"
+
     private const val KEYSTORE = "AndroidKeyStore"
-    private const val ALIAS = "discordrp.token.v1"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val TAG_BITS = 128
     private const val KEY_BITS = 256
 
     @Synchronized
-    fun encrypt(plaintext: String): String {
+    fun encrypt(plaintext: String, alias: String = ALIAS): String {
         val bytes = plaintext.toByteArray(Charsets.UTF_8)
         try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, key())
+            cipher.init(Cipher.ENCRYPT_MODE, key(alias))
             val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
             val body = Base64.encodeToString(cipher.doFinal(bytes), Base64.NO_WRAP)
             return "$iv:$body"
@@ -46,7 +48,7 @@ internal object TokenVault {
     }
 
     @Synchronized
-    fun decrypt(sealed: String): String? = try {
+    fun decrypt(sealed: String, alias: String = ALIAS): String? = try {
         val parts = sealed.split(':', limit = 2)
         if (parts.size != 2) {
             null
@@ -54,7 +56,7 @@ internal object TokenVault {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(
                 Cipher.DECRYPT_MODE,
-                key(),
+                key(alias),
                 GCMParameterSpec(TAG_BITS, Base64.decode(parts[0], Base64.NO_WRAP)),
             )
             val plain = cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP))
@@ -71,34 +73,35 @@ internal object TokenVault {
     }
 
     /**
-     * Drops the key. Call on an explicit sign-out so even a sealed blob that
-     * escaped the app sandbox (backup, extracted file) cannot be opened again.
+     * Drops the key. Called whenever the stored credential is discarded, so
+     * even a sealed blob that escaped the app sandbox (backup, extracted file)
+     * cannot be opened again.
      */
     @Synchronized
-    fun forget() {
+    fun forget(alias: String = ALIAS) {
         runCatching {
-            KeyStore.getInstance(KEYSTORE).apply { load(null) }.deleteEntry(ALIAS)
+            KeyStore.getInstance(KEYSTORE).apply { load(null) }.deleteEntry(alias)
         }
     }
 
-    private fun key(): SecretKey {
+    private fun key(alias: String): SecretKey {
         val store = KeyStore.getInstance(KEYSTORE).apply { load(null) }
-        (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }
-        return generate()
+        (store.getKey(alias, null) as? SecretKey)?.let { return it }
+        return generate(alias)
     }
 
-    private fun generate(): SecretKey {
+    private fun generate(alias: String): SecretKey {
         // Hardware-backed keys when the device offers them; the fallback keeps
         // the app working where StrongBox is absent or already occupied.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            runCatching { generate(strongBox = true) }.getOrNull()?.let { return it }
+            runCatching { generate(alias, strongBox = true) }.getOrNull()?.let { return it }
         }
-        return generate(strongBox = false)
+        return generate(alias, strongBox = false)
     }
 
-    private fun generate(strongBox: Boolean): SecretKey {
+    private fun generate(alias: String, strongBox: Boolean): SecretKey {
         val builder = KeyGenParameterSpec.Builder(
-            ALIAS,
+            alias,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)

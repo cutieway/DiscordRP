@@ -69,7 +69,7 @@ No analytics, no crash reporting, and no server in the middle. The app talks to 
 MusicBrainz, the Cover Art Archive, and GitHub for update checks directly. Your login never
 leaves the device except to Discord: it is sealed with an Android Keystore key
 (AES-256-GCM, hardware-backed where available), stays out of logs, crash reports,
-notifications, and backups, and is removed when you sign out.
+notifications, and backups, and is removed when you sign out or Discord rejects it.
 
 ## Credits
 

@@ -14,9 +14,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Exercises the storage rules against a dedicated preferences file. The live
- * session in "stash" is never written, so a killed test process cannot sign the
- * developer out.
+ * Exercises the storage rules against a dedicated preferences file and key
+ * alias. The live session in "stash" is never written or re-keyed, so a killed
+ * test process cannot sign the developer out.
  */
 @RunWith(AndroidJUnit4::class)
 class TokenStorageTest {
@@ -77,9 +77,9 @@ class TokenStorageTest {
         val stash = stash()
         stash.authToken = "first-token"
 
-        // The plaintext is not cached: replacing the sealed blob behind the
-        // store's back changes what the next read returns.
-        prefs.edit().putString("discord.token.enc", TokenVault.encrypt("second-token")).commit()
+        // A second store instance rewrites the sealed blob; the first reads it
+        // fresh instead of serving a cached plaintext.
+        stash().authToken = "second-token"
 
         assertEquals("second-token", stash.authToken)
     }
@@ -89,11 +89,27 @@ class TokenStorageTest {
         val stash = stash()
         assertFalse(stash.signedIn)
 
-        prefs.edit().putString("discord.token.enc", TokenVault.encrypt("probe-token")).commit()
+        stash.authToken = "probe-token"
         assertTrue(stash.signedIn)
 
         stash.clearToken()
         assertFalse(stash.signedIn)
+    }
+
+    @Test
+    fun clearTokenDeletesTheKeySoAnEscapedBlobStaysUnreadable() {
+        val stash = stash()
+        stash.authToken = "clear-me"
+        val sealed = prefs.getString("discord.token.enc", null)!!
+
+        stash.clearToken()
+
+        // Simulate a blob that escaped the sandbox and is put back later.
+        // Reading runs TokenVault.decrypt for this store's alias; it must fail
+        // because clearToken removed that key.
+        prefs.edit().putString("discord.token.enc", sealed).commit()
+
+        assertEquals("", stash.authToken)
     }
 
     @Test

@@ -19,7 +19,6 @@ import net.spacealtctrl.discordrp.presence.BridgeFeed
 import net.spacealtctrl.discordrp.presence.PresenceComposer
 import net.spacealtctrl.discordrp.settings.Mood
 import net.spacealtctrl.discordrp.settings.Stash
-import net.spacealtctrl.discordrp.settings.TokenVault
 import net.spacealtctrl.discordrp.update.AppUpdate
 import net.spacealtctrl.discordrp.update.UpdateHub
 import net.spacealtctrl.discordrp.update.UpdateState
@@ -70,14 +69,14 @@ class YouViewModel @Inject constructor(
 
     fun signOut() {
         // clearApplicationUserData removes the sealed blob with the rest of the
-        // sandbox; drop the Keystore key and WebView copies first so neither
-        // survives even if the data wipe is interrupted.
+        // sandbox; clearToken drops the Keystore key and WebView copies first so
+        // neither survives even if the data wipe is interrupted.
         runCatching {
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
             WebStorage.getInstance().deleteAllData()
         }
-        TokenVault.forget()
+        stash.clearToken()
         appContext.getSystemService(ActivityManager::class.java)
             ?.clearApplicationUserData()
     }

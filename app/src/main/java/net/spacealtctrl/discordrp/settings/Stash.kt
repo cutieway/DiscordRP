@@ -10,7 +10,11 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration.Companion.hours
 
-class Stash private constructor(context: Context, prefsName: String = PREFS_NAME) {
+class Stash private constructor(
+    context: Context,
+    prefsName: String = PREFS_NAME,
+    private val tokenAlias: String = TokenVault.ALIAS,
+) {
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
 
@@ -35,7 +39,7 @@ class Stash private constructor(context: Context, prefsName: String = PREFS_NAME
             if (token.isEmpty()) {
                 clearToken()
             } else {
-                val sealed = TokenVault.encrypt(token)
+                val sealed = TokenVault.encrypt(token, tokenAlias)
                 write {
                     putString(KEY_TOKEN_ENC, sealed)
                     remove(KEY_TOKEN)
@@ -43,22 +47,29 @@ class Stash private constructor(context: Context, prefsName: String = PREFS_NAME
             }
         }
 
-    /** Drops the stored credential without touching the rest of the settings. */
-    fun clearToken() = write {
-        remove(KEY_TOKEN)
-        remove(KEY_TOKEN_ENC)
+    /**
+     * Drops the stored credential and its Keystore key. Deleting the key first
+     * makes an escaped copy of the sealed blob useless even if the process dies
+     * before the preference write lands.
+     */
+    fun clearToken() {
+        TokenVault.forget(tokenAlias)
+        write {
+            remove(KEY_TOKEN)
+            remove(KEY_TOKEN_ENC)
+        }
     }
 
     private fun readToken(): String {
         prefs.getString(KEY_TOKEN_ENC, null)?.let { sealed ->
-            TokenVault.decrypt(sealed)?.let { return it }
+            TokenVault.decrypt(sealed, tokenAlias)?.let { return it }
         }
         val legacy = prefs.getString(KEY_TOKEN, null).orEmpty()
         if (legacy.isBlank()) return ""
 
         // One-time migration from the pre-Keystore format. If sealing fails the
         // plaintext copy is still dropped; a token must not stay readable on disk.
-        val sealed = runCatching { TokenVault.encrypt(legacy) }.getOrNull()
+        val sealed = runCatching { TokenVault.encrypt(legacy, tokenAlias) }.getOrNull()
         write {
             if (sealed != null) putString(KEY_TOKEN_ENC, sealed)
             remove(KEY_TOKEN)
@@ -250,7 +261,7 @@ class Stash private constructor(context: Context, prefsName: String = PREFS_NAME
          * use it so a run can never clobber the developer's live session.
          */
         internal fun isolated(context: Context, prefsName: String): Stash =
-            Stash(context, prefsName)
+            Stash(context, prefsName, "${TokenVault.ALIAS}.$prefsName")
 
         private const val PREFS_NAME = "stash"
         private const val KEY_TOKEN = "discord.token"
