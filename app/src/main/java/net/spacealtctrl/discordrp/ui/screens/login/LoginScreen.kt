@@ -22,23 +22,33 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -104,6 +114,9 @@ fun LoginScreen(
 ) {
     val stage by viewModel.stage.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var manualTokenOpen by remember { mutableStateOf(false) }
+    var manualToken by remember { mutableStateOf("") }
+    var manualTokenVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(stage) {
         if (stage == LoginStage.Done) onDone()
@@ -231,6 +244,17 @@ fun LoginScreen(
                         )
                     }
                 }
+
+                TextButton(
+                    onClick = { manualTokenOpen = true },
+                    enabled = stage != LoginStage.Verifying,
+                ) {
+                    Text(
+                        text = stringResource(R.string.login_token_manual),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Look.palette.inkFaint,
+                    )
+                }
             }
         }
 
@@ -242,6 +266,73 @@ fun LoginScreen(
             ) {
                 TokenCapture(onToken = viewModel::onToken)
             }
+        }
+
+        if (manualTokenOpen) {
+            val cleanToken = manualToken.trim().removeSurrounding("\"").trim()
+            AlertDialog(
+                onDismissRequest = { manualTokenOpen = false },
+                title = { Text(stringResource(R.string.login_token_manual_title)) },
+                text = {
+                    Column {
+                        Text(
+                            text = stringResource(R.string.login_token_manual_help),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Look.palette.inkFaint,
+                        )
+                        OutlinedTextField(
+                            value = manualToken,
+                            onValueChange = { manualToken = it.trim() },
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.login_token_field_label)) },
+                            visualTransformation = if (manualTokenVisible) {
+                                VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            },
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = { manualTokenVisible = !manualTokenVisible },
+                                ) {
+                                    Icon(
+                                        imageVector = if (manualTokenVisible) {
+                                            Icons.Rounded.VisibilityOff
+                                        } else {
+                                            Icons.Rounded.Visibility
+                                        },
+                                        contentDescription = stringResource(
+                                            if (manualTokenVisible) {
+                                                R.string.login_token_hide
+                                            } else {
+                                                R.string.login_token_show
+                                            },
+                                        ),
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = Look.gaps.snug),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = cleanToken.isNotEmpty() && stage != LoginStage.Verifying,
+                        onClick = {
+                            manualTokenOpen = false
+                            viewModel.onToken(cleanToken)
+                        },
+                    ) {
+                        Text(stringResource(R.string.login_token_manual_submit))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { manualTokenOpen = false }) {
+                        Text(stringResource(R.string.common_cancel))
+                    }
+                },
+            )
         }
     }
 }
