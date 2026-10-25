@@ -82,6 +82,27 @@ class CrashRedactorTest {
     }
 
     @Test
+    fun redactsGenericStructuredTokensAndCookies() {
+        val report = """
+            {"token":"short-test-secret"}
+            {"Cookie":"session=example-secret"}
+            {"Authorization":"Basic dXNlcjpwYXNz"}
+            token=plainvalue
+            cookie=plaincookie
+        """.trimIndent()
+
+        val redacted = CrashRedactor.redact(report)
+        assertFalse(redacted.contains("short-test-secret"))
+        assertFalse(redacted.contains("example-secret"))
+        assertFalse(redacted.contains("dXNlcjpwYXNz"))
+        assertFalse(redacted.contains("plainvalue"))
+        assertFalse(redacted.contains("plaincookie"))
+        assertTrue(redacted.contains("\"token\""))
+        assertTrue(redacted.contains("\"Cookie\""))
+        assertTrue(redacted.contains("\"Authorization\""))
+    }
+
+    @Test
     fun leavesOrdinaryTextAlone() {
         val report = """
             java.lang.IllegalStateException: update signature mismatch

@@ -25,7 +25,8 @@ internal object CrashRedactor {
             ")=)[^&#\\s'\"]+",
     )
     private val FIELD = Regex(
-        "(?i)([\"']?(?:password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|" +
+        "(?i)([\"']?(?:password|passwd|pwd|secret|token|cookie|set[_-]?cookie|" +
+            "authorization|client[_-]?secret|api[_-]?key|" +
             "access[_-]?token|refresh[_-]?token|id[_-]?token|auth[_-]?token)" +
             "[\"']?\\s*[=:]\\s*)" +
             "(\"[^\"]*\"|'[^']*'|[^\\s,;&}\\)]+)",
