@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Visibility
@@ -47,6 +48,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -100,7 +102,8 @@ class LoginViewModel @Inject constructor(
         if (_stage.value == LoginStage.Verifying) return
         _stage.value = LoginStage.Verifying
         viewModelScope.launch {
-            _stage.value = if (handshake.run(token)) LoginStage.Done else LoginStage.Failed
+            val accepted = runCatching { handshake.run(token) }.getOrDefault(false)
+            _stage.value = if (accepted) LoginStage.Done else LoginStage.Failed
         }
     }
 }
@@ -117,6 +120,12 @@ fun LoginScreen(
     var manualTokenOpen by remember { mutableStateOf(false) }
     var manualToken by remember { mutableStateOf("") }
     var manualTokenVisible by remember { mutableStateOf(false) }
+
+    fun closeManualToken() {
+        manualTokenOpen = false
+        manualToken = ""
+        manualTokenVisible = false
+    }
 
     LaunchedEffect(stage) {
         if (stage == LoginStage.Done) onDone()
@@ -246,7 +255,11 @@ fun LoginScreen(
                 }
 
                 TextButton(
-                    onClick = { manualTokenOpen = true },
+                    onClick = {
+                        manualToken = ""
+                        manualTokenVisible = false
+                        manualTokenOpen = true
+                    },
                     enabled = stage != LoginStage.Verifying,
                 ) {
                     Text(
@@ -271,7 +284,7 @@ fun LoginScreen(
         if (manualTokenOpen) {
             val cleanToken = manualToken.trim().removeSurrounding("\"").trim()
             AlertDialog(
-                onDismissRequest = { manualTokenOpen = false },
+                onDismissRequest = ::closeManualToken,
                 title = { Text(stringResource(R.string.login_token_manual_title)) },
                 text = {
                     Column {
@@ -284,6 +297,10 @@ fun LoginScreen(
                             value = manualToken,
                             onValueChange = { manualToken = it.trim() },
                             singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                autoCorrectEnabled = false,
+                            ),
                             label = { Text(stringResource(R.string.login_token_field_label)) },
                             visualTransformation = if (manualTokenVisible) {
                                 VisualTransformation.None
@@ -320,7 +337,7 @@ fun LoginScreen(
                     TextButton(
                         enabled = cleanToken.isNotEmpty() && stage != LoginStage.Verifying,
                         onClick = {
-                            manualTokenOpen = false
+                            closeManualToken()
                             viewModel.onToken(cleanToken)
                         },
                     ) {
@@ -328,7 +345,7 @@ fun LoginScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { manualTokenOpen = false }) {
+                    TextButton(onClick = ::closeManualToken) {
                         Text(stringResource(R.string.common_cancel))
                     }
                 },
