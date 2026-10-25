@@ -17,13 +17,25 @@ internal object UpdateIdentity {
     fun verify(context: Context, apk: File) {
         val pm = context.packageManager
         val archive = pm.getPackageArchiveInfo(apk.absolutePath, signingFlags)
-            ?: error("unreadable update package")
+        if (archive == null) {
+            // Some devices refuse to parse an archive at all when signatures are
+            // requested and the APK has none. Confirm the package if the file is
+            // otherwise readable, then fail on identity.
+            val readable = pm.getPackageArchiveInfo(apk.absolutePath, 0)
+                ?: error("unreadable update package")
+            if (readable.packageName != context.packageName) error("update package id mismatch")
+            error("update signature mismatch")
+        }
         if (archive.packageName != context.packageName) {
             error("update package id mismatch")
         }
 
         val candidate = signerDigests(archive)
         val installed = signerDigests(pm.getPackageInfo(context.packageName, signingFlags))
+        // Signing-key rotation is intentionally not accepted. Verifying a
+        // lineage would let a rotated key pass, but without checking the APK's
+        // lineage against the installed certificate history a rotated key looks
+        // exactly like a foreign one, so identity failures stay fail-closed.
         if (candidate.isEmpty() || installed.isEmpty() || candidate != installed) {
             error("update signature mismatch")
         }
