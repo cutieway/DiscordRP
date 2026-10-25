@@ -28,8 +28,14 @@ internal object GatewayEndpoint {
     }
 
     private fun isGatewayHost(host: String): Boolean {
-        if (host == "gateway.discord.gg") return true
-        return host.endsWith(".discord.gg") &&
-            host.substringBefore('.').startsWith("gateway")
+        // Anchored to Discord's own three-label hosts: gateway.discord.gg or a
+        // sharded name such as gateway-us-east1-b.discord.gg. Suffix checks
+        // alone would also accept crafted names beneath discord.gg.
+        val labels = host.split('.')
+        if (labels.size != 3) return false
+        if (labels[1] != "discord" || labels[2] != "gg") return false
+        return labels[0] == "gateway" || SHARDED_LABEL.matches(labels[0])
     }
+
+    private val SHARDED_LABEL = Regex("gateway-[a-z0-9]+(?:-[a-z0-9]+)*")
 }

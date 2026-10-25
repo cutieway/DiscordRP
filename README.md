@@ -50,9 +50,11 @@ or Play Services required.
 ## Updates
 
 Fork builds check `cutieway/DiscordRP` releases. The updater requires the APK's
-SHA-256 digest from the release metadata and rejects an asset without one. Android
-also requires an update to be signed with the same key as the installed app, so
-publish fork releases with that key.
+SHA-256 digest from the release metadata and rejects an asset without one. Before
+handing a download to the installer it also verifies the package id and signing
+certificate against the running app. Android enforces the same signature rule at
+install time, so publish fork releases with the key the installed app was signed
+with.
 
 ## Setup
 

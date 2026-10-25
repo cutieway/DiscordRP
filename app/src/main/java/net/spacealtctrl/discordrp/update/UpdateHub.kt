@@ -158,10 +158,16 @@ class UpdateHub @Inject constructor(
             }
         }
         val expected = update.sha256
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
         if (actual != expected) {
             file.delete()
             error("download digest mismatch")
+        }
+        try {
+            UpdateIdentity.verify(context, file)
+        } catch (e: Exception) {
+            file.delete()
+            throw e
         }
         return file
     }

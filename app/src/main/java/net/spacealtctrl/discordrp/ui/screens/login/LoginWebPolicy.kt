@@ -16,10 +16,10 @@ internal object LoginWebPolicy {
         if (uri.userInfo != null) return false
         if (uri.port != -1 && uri.port != DEFAULT_HTTPS_PORT) return false
         val host = uri.host?.lowercase() ?: return false
-        return host == "discord.com" ||
-            host.endsWith(".discord.com") ||
-            host == "discordapp.com" ||
-            host.endsWith(".discordapp.com")
+        // Only the origins that serve the login application itself. Discord
+        // controls every subdomain, but none of them are needed to sign in, and
+        // extraction runs on this trust boundary.
+        return host == "discord.com" || host == "discordapp.com"
     }
 
     fun isDiscordAppUrl(raw: String?): Boolean {

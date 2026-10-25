@@ -58,8 +58,8 @@ private fun clearWebSession() {
 fun TokenCapture(onToken: (String) -> Unit) {
     AndroidView(
         onRelease = { webView ->
-            clearWebSession()
             webView.stopLoading()
+            clearWebSession()
             webView.destroy()
         },
         factory = { context ->
@@ -93,6 +93,11 @@ fun TokenCapture(onToken: (String) -> Unit) {
                             view.evaluateJavascript(TOKEN_READ) { result ->
                                 val token = tokenFromEvaluation(result)
                                 if (token != null && LoginWebPolicy.isDiscordUrl(view.url)) {
+                                    // Tear the Discord document down before wiping:
+                                    // page scripts must not get a chance to write a
+                                    // fresh token back into storage afterwards.
+                                    view.stopLoading()
+                                    view.loadUrl("about:blank")
                                     clearWebSession()
                                     view.visibility = View.GONE
                                     onToken(token)
