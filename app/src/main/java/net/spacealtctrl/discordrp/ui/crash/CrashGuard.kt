@@ -27,6 +27,7 @@ object CrashGuard {
 
     private fun describe(context: Context, error: Throwable): String {
         val trace = StringWriter().also { error.printStackTrace(PrintWriter(it)) }.toString()
+        val redacted = CrashRedactor.redact(trace)
         val version = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }.getOrNull() ?: "?"
@@ -36,7 +37,7 @@ object CrashGuard {
             |Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})
             |App version: $version
             |
-            |$trace
+            |$redacted
         """.trimMargin().take(REPORT_CAP)
     }
 
