@@ -2,6 +2,8 @@ package net.spacealtctrl.discordrp.ui.screens.login
 
 import android.annotation.SuppressLint
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -11,8 +13,10 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONTokener
+import java.util.concurrent.atomic.AtomicReference
 
 private const val LOGIN_URL = "https://discord.com/login"
 
@@ -34,6 +38,10 @@ private const val TOKEN_READ =
 private const val CAPTURE_INTERVAL_MS = 500L
 private const val CAPTURE_WINDOW_MS = 20_000L
 
+// A blank document commits in milliseconds; the timeout only exists so a
+// wedged renderer cannot keep the storage wipe from ever running.
+private const val CLEANUP_TIMEOUT_MS = 3_000L
+
 private const val FALLBACK_UA =
     "Mozilla/5.0 (Linux; Android 14; SM-S921U; Build/UP1A.231005.007) " +
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.363"
@@ -45,25 +53,64 @@ private fun tokenFromEvaluation(raw: String?): String? {
     return value.trim().removeSurrounding("\"").trim().takeIf { it.isNotEmpty() }
 }
 
-private fun clearWebSession() {
-    // The WebView keeps a second copy of the token in localStorage while the
-    // user is signed in. Drop it as soon as the app has the token, and again
-    // when the login sheet closes for any reason.
-    WebStorage.getInstance().deleteAllData()
-    CookieManager.getInstance().removeAllCookies(null)
+private class WebViewSessionOps(
+    private val webView: WebView,
+    private val handler: Handler,
+) : SessionOps {
+    override fun stopPage() {
+        webView.stopLoading()
+    }
+
+    override fun loadBlank() {
+        webView.loadUrl(SessionCleanup.BLANK_URL)
+    }
+
+    override fun clearStorage() {
+        // The WebView keeps a second copy of the token in localStorage while the
+        // user is signed in. The blank document has committed by now, so no
+        // Discord script is left to write it back.
+        WebStorage.getInstance().deleteAllData()
+    }
+
+    override fun removeCookies(onDone: () -> Unit) {
+        CookieManager.getInstance().removeAllCookies { handler.post(onDone) }
+    }
+
+    override fun flushCookies() {
+        CookieManager.getInstance().flush()
+    }
+
+    override fun clearCache() {
+        webView.clearCache(true)
+        webView.clearHistory()
+        webView.clearFormData()
+    }
+
+    override fun destroyPage() {
+        webView.destroy()
+    }
 }
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun TokenCapture(onToken: (String) -> Unit) {
+    val sessionRef = remember { AtomicReference<SessionCleanup?>(null) }
     AndroidView(
         onRelease = { webView ->
-            webView.stopLoading()
-            clearWebSession()
-            webView.destroy()
+            // The composable owns the view until here; detaching first keeps a
+            // deferred destroy legal.
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            sessionRef.get()?.release()
         },
         factory = { context ->
-            WebView(context).apply {
+            val handler = Handler(Looper.getMainLooper())
+            val webView = WebView(context)
+            val session = SessionCleanup(
+                ops = WebViewSessionOps(webView, handler),
+                scheduleTimeout = { action -> handler.postDelayed(action, CLEANUP_TIMEOUT_MS) },
+            )
+            sessionRef.set(session)
+            webView.apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -93,14 +140,13 @@ fun TokenCapture(onToken: (String) -> Unit) {
                             view.evaluateJavascript(TOKEN_READ) { result ->
                                 val token = tokenFromEvaluation(result)
                                 if (token != null && LoginWebPolicy.isDiscordUrl(view.url)) {
-                                    // Tear the Discord document down before wiping:
-                                    // page scripts must not get a chance to write a
-                                    // fresh token back into storage afterwards.
-                                    view.stopLoading()
-                                    view.loadUrl("about:blank")
-                                    clearWebSession()
+                                    // Hide the page and hand it to the cleanup
+                                    // sequence: it stops the page, swaps in
+                                    // about:blank, waits for that commit, then
+                                    // wipes storage and awaits cookie removal
+                                    // before the token is accepted.
                                     view.visibility = View.GONE
-                                    onToken(token)
+                                    session.start { onToken(token) }
                                     return@evaluateJavascript
                                 }
                                 if (System.currentTimeMillis() < deadline &&
@@ -146,6 +192,7 @@ fun TokenCapture(onToken: (String) -> Unit) {
                             view.requestLayout()
                             view.invalidate()
                         }
+                        session.onPageFinished(url)
                         capture(view, url)
                     }
                 }
