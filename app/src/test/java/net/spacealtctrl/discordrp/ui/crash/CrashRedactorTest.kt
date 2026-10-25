@@ -47,6 +47,41 @@ class CrashRedactorTest {
     }
 
     @Test
+    fun removesAwsAndGoogleSignedUrlSecrets() {
+        val report =
+            "GET https://bucket.s3.amazonaws.com/a?X-Amz-Signature=deadbeef" +
+                "&X-Amz-Credential=AKIAEXAMPLE&X-Amz-Security-Token=secretvalue" +
+                "&X-Amz-Date=20260101T000000Z\n" +
+                "GET https://storage.googleapis.com/b?X-Goog-Signature=cafe" +
+                "&X-Goog-Credential=svc%2F20260101&GoogleAccessId=svc@example.test&Expires=1"
+
+        val redacted = CrashRedactor.redact(report)
+        assertFalse(redacted.contains("deadbeef"))
+        assertFalse(redacted.contains("AKIAEXAMPLE"))
+        assertFalse(redacted.contains("secretvalue"))
+        assertFalse(redacted.contains("cafe"))
+        assertFalse(redacted.contains("svc@example.test"))
+        assertTrue(redacted.contains("X-Amz-Date=20260101T000000Z"))
+        assertTrue(redacted.contains("Expires=1"))
+    }
+
+    @Test
+    fun redactsStructuredCredentialFields() {
+        val report = """
+            {"password":"hunter2","clientSecret":"abc123","api_key":"k-1"}
+            client_secret=shh
+            PASSWORD: swordfish
+        """.trimIndent()
+
+        val redacted = CrashRedactor.redact(report)
+        assertFalse(redacted.contains("hunter2"))
+        assertFalse(redacted.contains("abc123"))
+        assertFalse(redacted.contains("k-1"))
+        assertFalse(redacted.contains("shh"))
+        assertFalse(redacted.contains("swordfish"))
+    }
+
+    @Test
     fun leavesOrdinaryTextAlone() {
         val report = """
             java.lang.IllegalStateException: update signature mismatch

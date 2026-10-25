@@ -17,8 +17,18 @@ internal object CrashRedactor {
             "|[A-Za-z0-9_-]{23,28}\\.[A-Za-z0-9_-]{6,7}\\.[A-Za-z0-9_-]{27,40})\\b",
     )
     private val QUERY = Regex(
-        "(?i)([?&](?:token|access_token|refresh_token|client_secret|code|hm|sig|signature|key)=)" +
-            "[^&#\\s'\"]+",
+        "(?i)([?&](?:" +
+            "token|access_token|refresh_token|id_token|client_secret|api[_-]?key|" +
+            "password|passwd|secret|session|session_id|code|hm|sig|signature|key|" +
+            "x-amz-signature|x-amz-credential|x-amz-security-token|" +
+            "x-goog-signature|x-goog-credential|googleaccessid|awsaccesskeyid" +
+            ")=)[^&#\\s'\"]+",
+    )
+    private val FIELD = Regex(
+        "(?i)([\"']?(?:password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|" +
+            "access[_-]?token|refresh[_-]?token|id[_-]?token|auth[_-]?token)" +
+            "[\"']?\\s*[=:]\\s*)" +
+            "(\"[^\"]*\"|'[^']*'|[^\\s,;&}\\)]+)",
     )
     private val USERINFO = Regex("([A-Za-z][A-Za-z0-9+.-]*://)[^/?#\\s@]+@")
 
@@ -27,5 +37,6 @@ internal object CrashRedactor {
         .replace(AUTH_SCHEME) { match -> "${match.groupValues[1]} $REPLACEMENT" }
         .replace(TOKEN, "[redacted-token]")
         .replace(QUERY) { match -> "${match.groupValues[1]}$REPLACEMENT" }
+        .replace(FIELD) { match -> "${match.groupValues[1]}$REPLACEMENT" }
         .replace(USERINFO) { match -> "${match.groupValues[1]}$REPLACEMENT@" }
 }
