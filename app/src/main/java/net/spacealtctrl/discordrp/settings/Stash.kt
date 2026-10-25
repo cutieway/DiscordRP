@@ -10,9 +10,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration.Companion.hours
 
-class Stash private constructor(context: Context) {
+class Stash private constructor(context: Context, prefsName: String = PREFS_NAME) {
     private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences("stash", Context.MODE_PRIVATE)
+        context.applicationContext.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -241,6 +241,14 @@ class Stash private constructor(context: Context) {
                 shared ?: Stash(context).also { shared = it }
             }
 
+        /**
+         * A store that does not share preferences with the signed-in app. Tests
+         * use it so a run can never clobber the developer's live session.
+         */
+        internal fun isolated(context: Context, prefsName: String): Stash =
+            Stash(context, prefsName)
+
+        private const val PREFS_NAME = "stash"
         private const val KEY_TOKEN = "discord.token"
         private const val KEY_TOKEN_ENC = "discord.token.enc"
         private const val KEY_SELF_ID = "discord.user.id"
