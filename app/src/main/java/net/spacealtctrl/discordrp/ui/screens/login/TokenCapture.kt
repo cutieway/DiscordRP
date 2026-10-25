@@ -31,41 +31,57 @@ fun TokenCapture(onToken: (String) -> Unit) {
             webView.destroy()
         },
         factory = { context ->
-        WebView(context).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            )
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            if (Build.MANUFACTURER.equals("motorola", ignoreCase = true)) {
-                settings.userAgentString = FALLBACK_UA
-            }
+            WebView(context).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                if (Build.MANUFACTURER.equals("motorola", ignoreCase = true)) {
+                    settings.userAgentString = FALLBACK_UA
+                }
 
-            webViewClient = object : WebViewClient() {
-                @Deprecated("Deprecated in Java")
-                override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
-                    stopLoading()
-                    if (url.endsWith("/app")) {
-                        loadUrl(TOKEN_HOOK)
-                        visibility = View.GONE
+                webViewClient = object : WebViewClient() {
+                    @Deprecated("Deprecated in Java")
+                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                        stopLoading()
+                        if (url.endsWith("/app")) {
+                            loadUrl(TOKEN_HOOK)
+                            visibility = View.GONE
+                        }
+                        return false
                     }
-                    return false
+
+                    // The first composited frame can stay white while the bottom
+                    // sheet animates in; repaint once the page is committed.
+                    override fun onPageCommitVisible(view: WebView, url: String) {
+                        super.onPageCommitVisible(view, url)
+                        view.postInvalidateOnAnimation()
+                    }
+
+                    override fun onPageFinished(view: WebView, url: String) {
+                        super.onPageFinished(view, url)
+                        view.post {
+                            view.requestLayout()
+                            view.invalidate()
+                        }
+                    }
                 }
-            }
-            webChromeClient = object : WebChromeClient() {
-                override fun onJsAlert(
-                    view: WebView,
-                    url: String,
-                    message: String,
-                    result: JsResult,
-                ): Boolean {
-                    onToken(message)
-                    visibility = View.GONE
-                    return true
+                webChromeClient = object : WebChromeClient() {
+                    override fun onJsAlert(
+                        view: WebView,
+                        url: String,
+                        message: String,
+                        result: JsResult,
+                    ): Boolean {
+                        onToken(message)
+                        visibility = View.GONE
+                        return true
+                    }
                 }
+                loadUrl(LOGIN_URL)
             }
-            loadUrl(LOGIN_URL)
-        }
-    })
+        },
+    )
 }
