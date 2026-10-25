@@ -86,20 +86,26 @@ class CrashRedactorTest {
         val report = """
             {"token":"short-test-secret"}
             {"Cookie":"session=example-secret"}
+            {"set-cookie":"session=json-cookie"}
             {"Authorization":"Basic dXNlcjpwYXNz"}
             token=plainvalue
             cookie=plaincookie
+            set_cookie=kv-cookie
         """.trimIndent()
 
         val redacted = CrashRedactor.redact(report)
         assertFalse(redacted.contains("short-test-secret"))
         assertFalse(redacted.contains("example-secret"))
+        assertFalse(redacted.contains("json-cookie"))
         assertFalse(redacted.contains("dXNlcjpwYXNz"))
         assertFalse(redacted.contains("plainvalue"))
         assertFalse(redacted.contains("plaincookie"))
+        assertFalse(redacted.contains("kv-cookie"))
         assertTrue(redacted.contains("\"token\""))
         assertTrue(redacted.contains("\"Cookie\""))
+        assertTrue(redacted.contains("\"set-cookie\""))
         assertTrue(redacted.contains("\"Authorization\""))
+        assertTrue(redacted.contains("set_cookie="))
     }
 
     @Test
