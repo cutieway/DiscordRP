@@ -14,6 +14,13 @@ internal object UpdatePolicy {
     private const val DEFAULT_HTTPS_PORT = 443
     private val SHA256 = Regex("[0-9a-f]{64}")
 
+    // GitHub answers release-asset downloads with a redirect to a signed,
+    // short-lived object URL. Both hosts are first-party.
+    private val REDIRECT_HOSTS = setOf(
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+    )
+
     fun isTrustedApkUrl(raw: String?): Boolean {
         val uri = raw?.let { runCatching { URI(it) }.getOrNull() } ?: return false
         if (!"https".equals(uri.scheme, ignoreCase = true)) return false
@@ -22,6 +29,25 @@ internal object UpdatePolicy {
         if (uri.port != -1 && uri.port != DEFAULT_HTTPS_PORT) return false
         if (uri.rawQuery != null || uri.fragment != null) return false
         return uri.path?.startsWith(ASSET_PREFIX) == true
+    }
+
+    /**
+     * Rechecked at download time. [resolved] is the URL the HTTP client actually
+     * ends up on after redirects; a redirect may only land on GitHub's signed
+     * asset host, and a direct answer must still be the trusted asset URL.
+     */
+    fun isTrustedDownloadUrl(initial: String?, resolved: String?): Boolean {
+        if (!isTrustedApkUrl(initial)) return false
+        val uri = resolved?.let { runCatching { URI(it) }.getOrNull() } ?: return false
+        if (!"https".equals(uri.scheme, ignoreCase = true)) return false
+        if (uri.userInfo != null) return false
+        if (uri.port != -1 && uri.port != DEFAULT_HTTPS_PORT) return false
+        if (uri.fragment != null) return false
+        return when (uri.host?.lowercase()) {
+            "github.com" -> isTrustedApkUrl(resolved)
+            in REDIRECT_HOSTS -> true
+            else -> false
+        }
     }
 
     fun sha256(raw: String?): String? {

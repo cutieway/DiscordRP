@@ -134,42 +134,56 @@ class UpdateHub @Inject constructor(
     }
 
     private suspend fun download(update: AppUpdate): File {
+        // Rechecked here as well as when the feed was parsed: this is the point
+        // where the URL turns into a network request.
+        if (!UpdatePolicy.isTrustedApkUrl(update.apkUrl)) error("untrusted update url")
         val dir = File(context.cacheDir, UPDATES_DIR).apply { mkdirs() }
         val safeVersion = update.version.replace(Regex("[^A-Za-z0-9._-]"), "_")
         val file = File(dir, "DiscordRP-$safeVersion.apk")
-        val digest = MessageDigest.getInstance("SHA-256")
-        http.prepareGet(update.apkUrl) {
-            timeout { requestTimeoutMillis = DOWNLOAD_TIMEOUT_MS }
-        }.execute { response ->
-            if (response.status.value !in 200..299) {
-                error("download answered ${response.status.value}")
-            }
-            file.outputStream().use { out ->
-                val channel = response.bodyAsChannel()
-                val buffer = ByteArray(DOWNLOAD_CHUNK_BYTES)
-                while (true) {
-                    val read = channel.readAvailable(buffer, 0, buffer.size)
-                    if (read == -1) break
-                    if (read > 0) {
-                        out.write(buffer, 0, read)
-                        digest.update(buffer, 0, read)
+        try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            var written = 0L
+            http.prepareGet(update.apkUrl) {
+                timeout { requestTimeoutMillis = DOWNLOAD_TIMEOUT_MS }
+            }.execute { response ->
+                if (response.status.value !in 200..299) {
+                    error("download answered ${response.status.value}")
+                }
+                val resolved = response.call.request.url.toString()
+                if (!UpdatePolicy.isTrustedDownloadUrl(update.apkUrl, resolved)) {
+                    error("download redirected to an untrusted host")
+                }
+                val declared = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+                if (declared != null && (declared < 0 || declared > MAX_APK_BYTES)) {
+                    error("update size is outside the accepted range")
+                }
+                file.outputStream().use { out ->
+                    val channel = response.bodyAsChannel()
+                    val buffer = ByteArray(DOWNLOAD_CHUNK_BYTES)
+                    while (true) {
+                        val read = channel.readAvailable(buffer, 0, buffer.size)
+                        if (read == -1) break
+                        if (read > 0) {
+                            written += read
+                            if (written > MAX_APK_BYTES) {
+                                error("update size is outside the accepted range")
+                            }
+                            out.write(buffer, 0, read)
+                            digest.update(buffer, 0, read)
+                        }
                     }
                 }
             }
-        }
-        val expected = update.sha256
-        val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
-        if (actual != expected) {
-            file.delete()
-            error("download digest mismatch")
-        }
-        try {
+            val expected = update.sha256
+            val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            if (actual != expected) error("download digest mismatch")
             UpdateIdentity.verify(context, file)
-        } catch (e: Exception) {
+            return file
+        } catch (e: Throwable) {
+            // No partial file may survive a failed or cancelled download.
             file.delete()
             throw e
         }
-        return file
     }
 
     private fun launchInstaller(apk: File) {
@@ -201,5 +215,6 @@ class UpdateHub @Inject constructor(
         const val AUTO_CHECK_COOLDOWN_MS = 6 * 60 * 60 * 1000L
         const val DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000L
         const val DOWNLOAD_CHUNK_BYTES = 64 * 1024
+        const val MAX_APK_BYTES = 100L * 1024 * 1024
     }
 }

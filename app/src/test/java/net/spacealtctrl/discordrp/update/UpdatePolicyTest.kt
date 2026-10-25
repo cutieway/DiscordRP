@@ -53,4 +53,51 @@ class UpdatePolicyTest {
         assertNull(UpdatePolicy.sha256("sha256:${"a".repeat(65)}"))
         assertNull(UpdatePolicy.sha256("md5:$digest"))
     }
+
+    @Test
+    fun acceptsOnlyGitHubRedirectTargets() {
+        val asset = "https://github.com/cutieway/DiscordRP/releases/download/v1.6.0/app.apk"
+        assertTrue(UpdatePolicy.isTrustedDownloadUrl(asset, asset))
+        assertTrue(
+            UpdatePolicy.isTrustedDownloadUrl(
+                asset,
+                "https://objects.githubusercontent.com/github-production-release-asset-2e65be/1?X-Amz-Signature=abc",
+            ),
+        )
+        assertTrue(
+            UpdatePolicy.isTrustedDownloadUrl(
+                asset,
+                "https://release-assets.githubusercontent.com/github-production-release-asset/2?X-Amz-Signature=def",
+            ),
+        )
+
+        assertFalse(UpdatePolicy.isTrustedDownloadUrl(asset, "https://evil.test/app.apk"))
+        assertFalse(
+            UpdatePolicy.isTrustedDownloadUrl(
+                asset,
+                "https://objects.githubusercontent.com.evil.test/app.apk",
+            ),
+        )
+        assertFalse(
+            UpdatePolicy.isTrustedDownloadUrl(
+                asset,
+                "http://objects.githubusercontent.com/app.apk",
+            ),
+        )
+        assertFalse(
+            UpdatePolicy.isTrustedDownloadUrl(
+                asset,
+                "https://user@objects.githubusercontent.com/app.apk",
+            ),
+        )
+        assertFalse(
+            UpdatePolicy.isTrustedDownloadUrl(
+                asset,
+                "https://objects.githubusercontent.com:8443/app.apk",
+            ),
+        )
+        assertFalse(UpdatePolicy.isTrustedDownloadUrl(asset, "https://github.com/cutieway"))
+        assertFalse(UpdatePolicy.isTrustedDownloadUrl("https://evil.test/app.apk", asset))
+        assertFalse(UpdatePolicy.isTrustedDownloadUrl(asset, null))
+    }
 }
