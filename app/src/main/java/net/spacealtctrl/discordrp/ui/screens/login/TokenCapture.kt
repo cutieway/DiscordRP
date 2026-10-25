@@ -47,6 +47,10 @@ private fun isDiscordAppUrl(raw: String?): Boolean {
 fun TokenCapture(onToken: (String) -> Unit) {
     AndroidView(
         onRelease = { webView ->
+            // Never leave Discord's web session (and a possible token in its
+            // localStorage) behind after the login sheet closes.
+            WebStorage.getInstance().deleteAllData()
+            CookieManager.getInstance().removeAllCookies(null)
             webView.stopLoading()
             webView.destroy()
         },
