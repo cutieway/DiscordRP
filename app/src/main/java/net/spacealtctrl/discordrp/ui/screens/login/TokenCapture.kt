@@ -65,6 +65,10 @@ private class WebViewSessionOps(
         webView.loadUrl(SessionCleanup.BLANK_URL)
     }
 
+    override fun detach() {
+        (webView.parent as? ViewGroup)?.removeView(webView)
+    }
+
     override fun clearStorage() {
         // The WebView keeps a second copy of the token in localStorage while the
         // user is signed in. The blank document has committed by now, so no
@@ -100,7 +104,7 @@ fun TokenCapture(onToken: (String) -> Unit) {
             // The composable owns the view until here; detaching first keeps a
             // deferred destroy legal.
             (webView.parent as? ViewGroup)?.removeView(webView)
-            sessionRef.get()?.release()
+            sessionRef.get()?.cancel()
         },
         factory = { context ->
             val handler = Handler(Looper.getMainLooper())
@@ -129,6 +133,7 @@ fun TokenCapture(onToken: (String) -> Unit) {
                     private var capturing = false
 
                     private fun capture(view: WebView, url: String?) {
+                        if (session.isCancelled) return
                         if (capturing || !LoginWebPolicy.isDiscordAppUrl(url)) return
                         capturing = true
                         val deadline = System.currentTimeMillis() + CAPTURE_WINDOW_MS
@@ -138,8 +143,11 @@ fun TokenCapture(onToken: (String) -> Unit) {
                         // deadline instead of sampling a fixed number of times.
                         fun read() {
                             view.evaluateJavascript(TOKEN_READ) { result ->
+                                if (session.isCancelled) return@evaluateJavascript
                                 val token = tokenFromEvaluation(result)
-                                if (token != null && LoginWebPolicy.isDiscordUrl(view.url)) {
+                                if (token != null && !session.isCancelled &&
+                                    LoginWebPolicy.isDiscordUrl(view.url)
+                                ) {
                                     // Hide the page and hand it to the cleanup
                                     // sequence: it stops the page, swaps in
                                     // about:blank, waits for that commit, then

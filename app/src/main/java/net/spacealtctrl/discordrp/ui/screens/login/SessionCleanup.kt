@@ -11,6 +11,9 @@ internal interface SessionOps {
 
     fun loadBlank()
 
+    /** Detaches the view; [destroyPage] refuses to run while it is attached. */
+    fun detach()
+
     fun clearStorage()
 
     /** Must call [onDone] only after the cookie store is actually gone. */
@@ -30,6 +33,11 @@ internal interface SessionOps {
  * storage, and only after [SessionOps.removeCookies] reports completion flush
  * the cookie store and consider the session cleaned.
  *
+ * If the blank navigation never commits, the timeout path fails closed instead
+ * of pretending the commit happened: the view is detached and destroyed (which
+ * stops the still-live document) and only then are storage and cookies wiped.
+ * That path never delivers a capture callback.
+ *
  * Both the successful capture path and the cancel path go through the same
  * instance, so the work happens once. Destruction is deferred until cleanup is
  * complete even when the composable is released first.
@@ -43,23 +51,28 @@ internal class SessionCleanup(
     private var complete = false
     private var destroyWhenComplete = false
     private var destroyed = false
+    private var cancelled = false
     private var onCleaned: (() -> Unit)? = null
 
+    /** True once capture is cancelled or the fail-closed timeout has run. */
+    val isCancelled: Boolean get() = cancelled
+
     fun start(onCleaned: (() -> Unit)? = null) {
+        // A capture callback arriving after cancellation must never be accepted;
+        // the token may have been read from a document that was never torn down.
+        if (cancelled) return
         if (onCleaned != null) this.onCleaned = onCleaned
         if (complete) {
             deliver()
             return
         }
-        if (!started.compareAndSet(false, true)) return
-        ops.stopPage()
-        ops.loadBlank()
-        scheduleTimeout { clear() }
+        begin()
     }
 
-    /** Called for every page finish; only the blank document starts cleanup. */
-    fun onPageFinished(url: String) {
-        if (url == BLANK_URL) clear()
+    fun cancel() {
+        cancelled = true
+        onCleaned = null
+        release()
     }
 
     fun release() {
@@ -68,7 +81,19 @@ internal class SessionCleanup(
             destroy()
             return
         }
-        start()
+        begin()
+    }
+
+    /** Called for every page finish; only the blank document starts cleanup. */
+    fun onPageFinished(url: String) {
+        if (url == BLANK_URL) clear()
+    }
+
+    private fun begin() {
+        if (!started.compareAndSet(false, true)) return
+        ops.stopPage()
+        ops.loadBlank()
+        scheduleTimeout { failClosed() }
     }
 
     private fun clear() {
@@ -85,7 +110,28 @@ internal class SessionCleanup(
         }
     }
 
+    /**
+     * The blank document never committed, so the previous document may still be
+     * executing and could write the token back after a wipe. Destroying the view
+     * stops it; only then is storage safe to clear.
+     */
+    private fun failClosed() {
+        if (complete || clearing) return
+        clearing = true
+        cancelled = true
+        onCleaned = null
+        ops.detach()
+        destroy()
+        ops.clearStorage()
+        ops.removeCookies {
+            if (complete) return@removeCookies
+            ops.flushCookies()
+            complete = true
+        }
+    }
+
     private fun deliver() {
+        if (cancelled) return
         val callback = onCleaned
         onCleaned = null
         callback?.invoke()

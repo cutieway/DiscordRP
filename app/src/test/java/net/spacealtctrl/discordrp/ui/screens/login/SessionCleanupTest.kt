@@ -2,6 +2,7 @@ package net.spacealtctrl.discordrp.ui.screens.login
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionCleanupTest {
@@ -63,14 +64,44 @@ class SessionCleanupTest {
     }
 
     @Test
-    fun timeoutClearsWhenTheBlankCommitNeverArrives() {
+    fun timeoutFailsClosedInsteadOfWipingALivePage() {
         var cleaned = 0
         cleanup.start { cleaned++ }
         timeout!!.invoke()
 
-        assertEquals(listOf("stop", "blank", "storage", "cookies"), ops.calls)
+        assertEquals(listOf("stop", "blank", "detach", "destroy", "storage", "cookies"), ops.calls)
+        assertTrue(cleanup.isCancelled)
+
         ops.cookieCallback!!.invoke()
-        assertEquals(1, cleaned)
+        assertEquals(
+            listOf("stop", "blank", "detach", "destroy", "storage", "cookies", "flush"),
+            ops.calls,
+        )
+        assertEquals(0, cleaned)
+
+        // A late blank commit or capture result must not restart the normal path.
+        cleanup.onPageFinished(SessionCleanup.BLANK_URL)
+        cleanup.start { cleaned++ }
+        assertEquals(
+            listOf("stop", "blank", "detach", "destroy", "storage", "cookies", "flush"),
+            ops.calls,
+        )
+        assertEquals(0, cleaned)
+    }
+
+    @Test
+    fun lateCaptureResultAfterCancelIsNotDelivered() {
+        var cleaned = 0
+        cleanup.start { cleaned++ }
+        cleanup.cancel()
+        cleanup.onPageFinished(SessionCleanup.BLANK_URL)
+
+        ops.cookieCallback!!.invoke()
+        assertTrue(cleanup.isCancelled)
+
+        // The pending evaluateJavascript callback returns after cleanup finished.
+        cleanup.start { cleaned++ }
+        assertEquals(0, cleaned)
     }
 
     @Test
@@ -95,6 +126,10 @@ class SessionCleanupTest {
 
         override fun loadBlank() {
             calls += "blank"
+        }
+
+        override fun detach() {
+            calls += "detach"
         }
 
         override fun clearStorage() {
