@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.FixMethodOrder
@@ -47,5 +48,27 @@ class TokenStorageTest {
         }
         assertEquals(previous, stash.authToken)
         assertEquals(previous.isNotBlank(), stash.signedIn)
+    }
+
+    @Test
+    fun c_clearingTokenRemovesBothStoredKeys() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = context.getSharedPreferences("stash", Context.MODE_PRIVATE)
+        val stash = Stash.of(context)
+
+        stash.authToken = "clear-me"
+        stash.authToken = ""
+
+        assertFalse(stash.signedIn)
+        assertNull(prefs.getString("discord.token", null))
+        assertNull(prefs.getString("discord.token.enc", null))
+
+        // Stash.write applies asynchronously. Flush the removal so tearing the
+        // instrumentation process down right after the run cannot leave a stale
+        // sealed token behind (which would look like a signed-in session).
+        prefs.edit()
+            .remove("discord.token")
+            .remove("discord.token.enc")
+            .commit()
     }
 }

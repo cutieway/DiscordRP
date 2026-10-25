@@ -1,45 +1,56 @@
 package net.spacealtctrl.discordrp.ui.screens.login
 
 import android.annotation.SuppressLint
-import android.net.Uri
 import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
-import android.webkit.JsResult
-import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.viewinterop.AndroidView
+import org.json.JSONTokener
 
 private const val LOGIN_URL = "https://discord.com/login"
-private const val TOKEN_ALERT_PREFIX = "discordrp-token:"
 
-private const val TOKEN_HOOK =
-    "javascript:(function()%7Bvar%20i%3Ddocument.createElement('iframe')%3B" +
-        "document.body.appendChild(i)%3B" +
-        "alert('discordrp-token:'%2Bi.contentWindow.localStorage.token.slice(1,-1))%7D)()"
+// Discord's login page removes the storage API from the top window once its
+// scripts run, but a same-origin iframe still reaches the same storage area.
+// Read through the iframe and drop it again in the same turn.
+private const val TOKEN_READ =
+    "(function(){var f=null;try{" +
+        "f=document.createElement('iframe');" +
+        "f.style.display='none';" +
+        "(document.documentElement||document.body).appendChild(f);" +
+        "var t=f.contentWindow.localStorage.getItem('token');" +
+        "if(!t)return '';" +
+        "try{return JSON.parse(t)}catch(e){return t}" +
+    "}catch(e){return ''}" +
+    "finally{if(f&&f.parentNode)f.parentNode.removeChild(f)}" +
+    "})()"
+
+private const val CAPTURE_INTERVAL_MS = 500L
+private const val CAPTURE_WINDOW_MS = 20_000L
 
 private const val FALLBACK_UA =
     "Mozilla/5.0 (Linux; Android 14; SM-S921U; Build/UP1A.231005.007) " +
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.363"
 
-private fun isDiscordUrl(raw: String?): Boolean {
-    val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return false
-    if (uri.scheme != "https") return false
-    val host = uri.host?.lowercase() ?: return false
-    return host == "discord.com" ||
-        host.endsWith(".discord.com") ||
-        host == "discordapp.com" ||
-        host.endsWith(".discordapp.com")
+private fun tokenFromEvaluation(raw: String?): String? {
+    if (raw.isNullOrBlank() || raw == "null") return null
+    val value = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
+        ?: return null
+    return value.trim().removeSurrounding("\"").trim().takeIf { it.isNotEmpty() }
 }
 
-private fun isDiscordAppUrl(raw: String?): Boolean {
-    val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return false
-    return isDiscordUrl(raw) && uri.path?.trimEnd('/') == "/app"
+private fun clearWebSession() {
+    // The WebView keeps a second copy of the token in localStorage while the
+    // user is signed in. Drop it as soon as the app has the token, and again
+    // when the login sheet closes for any reason.
+    WebStorage.getInstance().deleteAllData()
+    CookieManager.getInstance().removeAllCookies(null)
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -47,10 +58,7 @@ private fun isDiscordAppUrl(raw: String?): Boolean {
 fun TokenCapture(onToken: (String) -> Unit) {
     AndroidView(
         onRelease = { webView ->
-            // Never leave Discord's web session (and a possible token in its
-            // localStorage) behind after the login sheet closes.
-            WebStorage.getInstance().deleteAllData()
-            CookieManager.getInstance().removeAllCookies(null)
+            clearWebSession()
             webView.stopLoading()
             webView.destroy()
         },
@@ -74,16 +82,45 @@ fun TokenCapture(onToken: (String) -> Unit) {
                     private var capturing = false
 
                     private fun capture(view: WebView, url: String?) {
-                        if (capturing || !isDiscordAppUrl(url)) return
+                        if (capturing || !LoginWebPolicy.isDiscordAppUrl(url)) return
                         capturing = true
-                        view.loadUrl(TOKEN_HOOK)
-                        view.visibility = View.GONE
+                        val deadline = System.currentTimeMillis() + CAPTURE_WINDOW_MS
+
+                        // The token lands in storage a moment after Discord
+                        // starts navigating to /app, so keep reading until the
+                        // deadline instead of sampling a fixed number of times.
+                        fun read() {
+                            view.evaluateJavascript(TOKEN_READ) { result ->
+                                val token = tokenFromEvaluation(result)
+                                if (token != null && LoginWebPolicy.isDiscordUrl(view.url)) {
+                                    clearWebSession()
+                                    view.visibility = View.GONE
+                                    onToken(token)
+                                    return@evaluateJavascript
+                                }
+                                if (System.currentTimeMillis() < deadline &&
+                                    LoginWebPolicy.isDiscordUrl(view.url)
+                                ) {
+                                    view.postDelayed({
+                                        read()
+                                    }, CAPTURE_INTERVAL_MS)
+                                } else {
+                                    capturing = false
+                                }
+                            }
+                        }
+
+                        read()
                     }
 
-                    @Deprecated("Deprecated in Java")
-                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
-                        if (!isDiscordUrl(url)) return true
-                        if (isDiscordAppUrl(url)) {
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView,
+                        request: WebResourceRequest,
+                    ): Boolean {
+                        if (!request.isForMainFrame) return false
+                        val url = request.url.toString()
+                        if (!LoginWebPolicy.isDiscordUrl(url)) return true
+                        if (LoginWebPolicy.isDiscordAppUrl(url)) {
                             view.stopLoading()
                             capture(view, url)
                             return true
@@ -105,30 +142,6 @@ fun TokenCapture(onToken: (String) -> Unit) {
                             view.invalidate()
                         }
                         capture(view, url)
-                    }
-                }
-                webChromeClient = object : WebChromeClient() {
-                    override fun onJsAlert(
-                        view: WebView,
-                        url: String,
-                        message: String,
-                        result: JsResult,
-                    ): Boolean {
-                        // Only our prefixed alert on Discord's own origin is a
-                        // token; every other page dialog stays with WebView.
-                        if (!message.startsWith(TOKEN_ALERT_PREFIX) || !isDiscordUrl(url)) {
-                            return false
-                        }
-                        val token = message.removePrefix(TOKEN_ALERT_PREFIX).trim()
-                        if (token.isEmpty()) return true
-
-                        // The app keeps the token in Keystore-sealed prefs; drop
-                        // Discord's web session copy so it is not stored twice.
-                        WebStorage.getInstance().deleteAllData()
-                        CookieManager.getInstance().removeAllCookies(null)
-                        onToken(token)
-                        view.visibility = View.GONE
-                        return true
                     }
                 }
                 loadUrl(LOGIN_URL)

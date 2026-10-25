@@ -20,3 +20,5 @@ secrets.properties
 .DS_Store
 
 .claude/
+
+temp.md

@@ -42,7 +42,17 @@ Get the latest APK from [Releases](../../releases). Android 8.0 or newer, no Goo
 or Play Services required.
 
 > **Warning**
-> This app uses the Discord gateway connection. Use it at your own risk.
+> This is an unofficial client that signs in with a Discord user token. Discord's
+> developer policy prohibits applications from obtaining user login tokens, and
+> using one can lead to account restriction or termination. Use a test account
+> unless you accept that risk.
+
+## Updates
+
+Fork builds check `cutieway/DiscordRP` releases. The updater requires the APK's
+SHA-256 digest from the release metadata and rejects an asset without one. Android
+also requires an update to be signed with the same key as the installed app, so
+publish fork releases with that key.
 
 ## Setup
 
@@ -57,8 +67,8 @@ reason messages stop arriving while the screen is off.
 ## Privacy
 
 No analytics, no crash reporting, and no server in the middle. The app talks to Discord,
-MusicBrainz, and the Cover Art Archive directly. Your login stays on the device and is
-removed by signing out.
+MusicBrainz, the Cover Art Archive, and GitHub for update checks directly. The login
+token is sealed with an Android Keystore key and is removed by signing out.
 
 ## Credits
 

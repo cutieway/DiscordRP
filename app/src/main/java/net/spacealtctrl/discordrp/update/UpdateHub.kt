@@ -2,7 +2,6 @@ package net.spacealtctrl.discordrp.update
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.ktor.client.HttpClient
@@ -13,6 +12,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -34,7 +34,7 @@ import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class AppUpdate(val version: String, val apkUrl: String, val sha256: String?)
+data class AppUpdate(val version: String, val apkUrl: String, val sha256: String)
 
 sealed interface UpdateState {
     data object Idle : UpdateState
@@ -97,28 +97,33 @@ class UpdateHub @Inject constructor(
     }
 
     private suspend fun fetchLatest(): UpdateState = try {
-        val release: FeedRelease = http.get(FEED_URL) {
+        val response = http.get(UpdatePolicy.FEED_URL) {
             header(HttpHeaders.Accept, "application/vnd.github+json")
-        }.body()
+        }
+        if (response.status == HttpStatusCode.NotFound) return UpdateState.UpToDate
+        val release: FeedRelease = response.body()
         val version = release.tagName.removePrefix("v")
         val apk = release.assets.firstOrNull { it.name.endsWith(".apk") }
             ?: return UpdateState.UpToDate
-        if (!isTrustedApkUrl(apk.downloadUrl)) {
+        if (!UpdatePolicy.isTrustedApkUrl(apk.downloadUrl)) {
             log.warn(TAG, "Release asset is not on the expected GitHub path")
             return UpdateState.Failed
         }
         when {
-            VersionOrder.isNewer(version, BuildConfig.VERSION_NAME) ->
+            VersionOrder.isNewer(version, BuildConfig.VERSION_NAME) -> {
+                val digest = UpdatePolicy.sha256(apk.digest)
+                if (digest == null) {
+                    log.warn(TAG, "Release asset has no valid SHA-256 digest")
+                    return UpdateState.Failed
+                }
                 UpdateState.Available(
                     AppUpdate(
                         version = version,
                         apkUrl = apk.downloadUrl,
-                        sha256 = apk.digest
-                            ?.takeIf { it.startsWith("sha256:") }
-                            ?.removePrefix("sha256:")
-                            ?.lowercase(),
+                        sha256 = digest,
                     ),
                 )
+            }
             else -> UpdateState.UpToDate
         }
     } catch (e: CancellationException) {
@@ -153,21 +158,12 @@ class UpdateHub @Inject constructor(
             }
         }
         val expected = update.sha256
-        if (expected != null) {
-            val actual = digest.digest().joinToString("") { "%02x".format(it) }
-            if (actual != expected) {
-                file.delete()
-                error("download digest mismatch")
-            }
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        if (actual != expected) {
+            file.delete()
+            error("download digest mismatch")
         }
         return file
-    }
-
-    private fun isTrustedApkUrl(raw: String): Boolean {
-        val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return false
-        return uri.scheme == "https" &&
-            uri.host == "github.com" &&
-            uri.path?.startsWith("/spacealtctrl/DiscordRP/releases/download/") == true
     }
 
     private fun launchInstaller(apk: File) {
@@ -194,9 +190,6 @@ class UpdateHub @Inject constructor(
 
     private companion object {
         const val TAG = "UpdateHub"
-
-        const val FEED_URL =
-            "https://api.github.com/repos/spacealtctrl/DiscordRP/releases/latest"
 
         const val UPDATES_DIR = "updates"
         const val AUTO_CHECK_COOLDOWN_MS = 6 * 60 * 60 * 1000L
