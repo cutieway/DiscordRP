@@ -2,6 +2,7 @@ package net.spacealtctrl.discordrp.update
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.ktor.client.HttpClient
@@ -29,10 +30,11 @@ import kotlinx.serialization.Serializable
 import net.spacealtctrl.discordrp.BuildConfig
 import net.spacealtctrl.discordrp.log.AppLog
 import java.io.File
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class AppUpdate(val version: String, val apkUrl: String)
+data class AppUpdate(val version: String, val apkUrl: String, val sha256: String?)
 
 sealed interface UpdateState {
     data object Idle : UpdateState
@@ -100,10 +102,23 @@ class UpdateHub @Inject constructor(
         }.body()
         val version = release.tagName.removePrefix("v")
         val apk = release.assets.firstOrNull { it.name.endsWith(".apk") }
+            ?: return UpdateState.UpToDate
+        if (!isTrustedApkUrl(apk.downloadUrl)) {
+            log.warn(TAG, "Release asset is not on the expected GitHub path")
+            return UpdateState.Failed
+        }
         when {
-            apk == null -> UpdateState.UpToDate
             VersionOrder.isNewer(version, BuildConfig.VERSION_NAME) ->
-                UpdateState.Available(AppUpdate(version, apk.downloadUrl))
+                UpdateState.Available(
+                    AppUpdate(
+                        version = version,
+                        apkUrl = apk.downloadUrl,
+                        sha256 = apk.digest
+                            ?.takeIf { it.startsWith("sha256:") }
+                            ?.removePrefix("sha256:")
+                            ?.lowercase(),
+                    ),
+                )
             else -> UpdateState.UpToDate
         }
     } catch (e: CancellationException) {
@@ -115,7 +130,9 @@ class UpdateHub @Inject constructor(
 
     private suspend fun download(update: AppUpdate): File {
         val dir = File(context.cacheDir, UPDATES_DIR).apply { mkdirs() }
-        val file = File(dir, "DiscordRP-${update.version}.apk")
+        val safeVersion = update.version.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val file = File(dir, "DiscordRP-$safeVersion.apk")
+        val digest = MessageDigest.getInstance("SHA-256")
         http.prepareGet(update.apkUrl) {
             timeout { requestTimeoutMillis = DOWNLOAD_TIMEOUT_MS }
         }.execute { response ->
@@ -128,11 +145,29 @@ class UpdateHub @Inject constructor(
                 while (true) {
                     val read = channel.readAvailable(buffer, 0, buffer.size)
                     if (read == -1) break
-                    if (read > 0) out.write(buffer, 0, read)
+                    if (read > 0) {
+                        out.write(buffer, 0, read)
+                        digest.update(buffer, 0, read)
+                    }
                 }
             }
         }
+        val expected = update.sha256
+        if (expected != null) {
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            if (actual != expected) {
+                file.delete()
+                error("download digest mismatch")
+            }
+        }
         return file
+    }
+
+    private fun isTrustedApkUrl(raw: String): Boolean {
+        val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return false
+        return uri.scheme == "https" &&
+            uri.host == "github.com" &&
+            uri.path?.startsWith("/spacealtctrl/DiscordRP/releases/download/") == true
     }
 
     private fun launchInstaller(apk: File) {
@@ -148,6 +183,7 @@ class UpdateHub @Inject constructor(
     private data class FeedAsset(
         val name: String,
         @SerialName("browser_download_url") val downloadUrl: String,
+        val digest: String? = null,
     )
 
     @Serializable
