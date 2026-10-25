@@ -19,6 +19,9 @@ class Stash private constructor(context: Context) {
     private val _revisions = MutableStateFlow(0)
     val revisions: StateFlow<Int> = _revisions.asStateFlow()
 
+    @Volatile
+    private var tokenCache: String? = null
+
     private fun write(block: SharedPreferences.Editor.() -> Unit) {
         val editor = prefs.edit()
         editor.block()
@@ -27,8 +30,41 @@ class Stash private constructor(context: Context) {
     }
 
     var authToken: String
-        get() = prefs.getString(KEY_TOKEN, null).orEmpty()
-        set(value) = write { putString(KEY_TOKEN, value) }
+        get() = tokenCache ?: readToken().also { if (it.isNotEmpty()) tokenCache = it }
+        set(value) {
+            val token = value.trim()
+            if (token.isEmpty()) {
+                tokenCache = ""
+                write {
+                    remove(KEY_TOKEN)
+                    remove(KEY_TOKEN_ENC)
+                }
+            } else {
+                val sealed = TokenVault.encrypt(token)
+                tokenCache = token
+                write {
+                    putString(KEY_TOKEN_ENC, sealed)
+                    remove(KEY_TOKEN)
+                }
+            }
+        }
+
+    private fun readToken(): String {
+        prefs.getString(KEY_TOKEN_ENC, null)?.let { sealed ->
+            TokenVault.decrypt(sealed)?.let { return it }
+        }
+        val legacy = prefs.getString(KEY_TOKEN, null).orEmpty()
+        if (legacy.isBlank()) return ""
+
+        // One-time migration from the pre-Keystore format. If sealing fails the
+        // plaintext copy is still dropped; a token must not stay readable on disk.
+        val sealed = runCatching { TokenVault.encrypt(legacy) }.getOrNull()
+        write {
+            if (sealed != null) putString(KEY_TOKEN_ENC, sealed)
+            remove(KEY_TOKEN)
+        }
+        return if (sealed != null) legacy else ""
+    }
 
     var selfId: String
         get() = prefs.getString(KEY_SELF_ID, null).orEmpty()
@@ -206,6 +242,7 @@ class Stash private constructor(context: Context) {
             }
 
         private const val KEY_TOKEN = "discord.token"
+        private const val KEY_TOKEN_ENC = "discord.token.enc"
         private const val KEY_SELF_ID = "discord.user.id"
         private const val KEY_SELF_BIO = "discord.user.bio"
         private const val KEY_SELF_NITRO = "discord.user.nitro"
