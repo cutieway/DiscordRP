@@ -1,8 +1,9 @@
 name: Release
 
 on:
-  push:
-    branches: [ "main" ]
+  # Automatic releases stay off until the fork's signing/PAT secrets exist.
+  # push:
+  #   branches: [ "main" ]
   workflow_dispatch:
     inputs:
       force_release:
